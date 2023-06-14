@@ -5,7 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 from time import sleep
 from IPython.display import clear_output
-from datetime import timedelta
+from datetime import timedelta, datetime
+from sklearn.preprocessing import StandardScaler
 
 
 class SCRAPER :
@@ -93,9 +94,11 @@ class SCRAPER :
                 dfs_h2h = [] # Loop for each potential opponent
                 for opp in team_dic.values() :
                     if opp != team :
-                        df_h2h = df.copy().groupby('Opponent').get_group(opp) # Get games against looped opponent
-                        df_h2h['H2H'] = [np.nan] + list(df_h2h['W'].rolling(1000, min_periods = 1).mean())[:-1] # Calculate the rolling H2H record
-                        dfs_h2h.append(df_h2h) # append "mini"-DataFrame with rolling H2H record for each opponent
+                        df_h2h = df.copy()
+                        df_h2h = df_h2h[df_h2h['Opponent'] == opp] # Get games against looped opponent
+                        if len(df_h2h) > 0 : # Only continue if team has played at least a game against looped opponent
+                            df_h2h['H2H'] = [np.nan] + list(df_h2h['W'].rolling(1000, min_periods = 1).mean())[:-1] # Calculate the rolling H2H record
+                            dfs_h2h.append(df_h2h) # append "mini"-DataFrame with rolling H2H record for each opponent
                 # Re-assemble the data by concatenating the "mini"-DataFrames
                 df = pd.concat(dfs_h2h).sort_values('Date').reset_index(drop = True)
 
@@ -147,3 +150,23 @@ class SCRAPER :
             # If save input is True, write the DataFrame into a .csv file
             if save :
                 data.to_csv(f'training_data/data_{year}.csv', index = None)
+
+    def load(self):
+
+        data_years = []
+        for year in self.years :
+            df = pd.read_csv(f'training_data/data_{year}.csv')
+            df['year'] = len(df) * [year]
+            # Standardise ORtg & DRtg columns 
+            stdcols = []
+            for col in df.columns:
+                if ('ORtg' in col) or ('DRtg' in col):
+                    stdcols.append(col)
+            df[stdcols] = StandardScaler().fit_transform(df[stdcols])
+            data_years.append(df)
+        # Assemble data
+        data = pd.concat(data_years)
+        data['H2H_home'] = data['H2H_home'].replace(np.nan, 0.5)
+        self.features = [x for x in list(data) if 'W/L%' in x or 'ORtg' in x or 'DRtg' in x or 'NRtg' in x or 'Streak' in x or 'H2H' in x or 'Games_past_week' in x or 'Rest' in x]
+
+        return data
